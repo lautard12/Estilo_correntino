@@ -1,0 +1,1 @@
+ALTER TABLE public.products ADD COLUMN quality_rating integer NULL DEFAULT NULL;
