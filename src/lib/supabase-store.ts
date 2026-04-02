@@ -136,9 +136,10 @@ export async function addProduct(data: {
   if (error) throw error;
 
   // Create initial balance
-  await supabase
+  const { error: balanceError } = await supabase
     .from("stock_balances")
     .insert({ product_id: product.id, qty_on_hand: 0 });
+  if (balanceError) throw balanceError;
 
   return product;
 }

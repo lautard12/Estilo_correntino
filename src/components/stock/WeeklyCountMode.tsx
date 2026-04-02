@@ -14,8 +14,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
-import { ProductType } from "@/lib/types";
 import { fetchCategories } from "@/lib/supabase-store";
+import { fetchTypes } from "@/lib/config-store";
 import {
   fetchSalesByDay,
   fetchSalesByProduct,
@@ -29,25 +29,12 @@ import {
   fetchLastClosedCount,
 } from "@/lib/weekly-count-store";
 
-const typeBadgeStyles: Record<string, string> = {
-  BEBIDAS: "bg-sky-100 text-sky-800 border-sky-200",
-  SNACKS: "bg-orange-100 text-orange-800 border-orange-200",
-  CIGARRILLOS: "bg-violet-100 text-violet-800 border-violet-200",
-};
-
 const statusLabels: Record<string, { label: string; className: string }> = {
   none: { label: "Sin conteo", className: "bg-muted text-muted-foreground" },
   DRAFT: { label: "Pendiente", className: "bg-amber-100 text-amber-800 border-amber-200" },
   ADJUSTED: { label: "Ajustado", className: "bg-blue-100 text-blue-800 border-blue-200" },
   CLOSED: { label: "Validado ✅", className: "bg-emerald-100 text-emerald-800 border-emerald-200" },
 };
-
-const typeChips = [
-  { label: "Todos", value: "all" },
-  { label: "Bebidas", value: "BEBIDAS" },
-  { label: "Snacks", value: "SNACKS" },
-  { label: "Cigarrillos", value: "CIGARRILLOS" },
-];
 
 export function WeeklyCountMode() {
   const queryClient = useQueryClient();
@@ -74,6 +61,11 @@ export function WeeklyCountMode() {
   const [inputsInitialized, setInputsInitialized] = useState(false);
 
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: fetchCategories });
+  const { data: productTypes = [] } = useQuery({ queryKey: ["cfg-types"], queryFn: fetchTypes });
+  const typeChips = [
+    { label: "Todos", value: "all" },
+    ...productTypes.filter((t) => t.is_active).map((t) => ({ label: t.name, value: t.name })),
+  ];
 
   const { data: lastClosed } = useQuery({
     queryKey: ["last-closed-count"],
@@ -435,7 +427,7 @@ export function WeeklyCountMode() {
                           {dayDetail.map((d: any, i: number) => (
                             <TableRow key={i}>
                               <TableCell>{d.name} <span className="text-muted-foreground text-sm">{d.variant_label}</span></TableCell>
-                              <TableCell><Badge variant="outline" className={typeBadgeStyles[d.type] ?? ""}>{d.type}</Badge></TableCell>
+                              <TableCell><Badge variant="outline">{d.type}</Badge></TableCell>
                               <TableCell className="text-right font-mono">{d.units}</TableCell>
                             </TableRow>
                           ))}
@@ -461,7 +453,7 @@ export function WeeklyCountMode() {
                       {filteredSalesByProduct.map((p) => (
                         <TableRow key={p.product_id}>
                           <TableCell>{p.name} <span className="text-muted-foreground text-sm">{p.variant_label}</span></TableCell>
-                          <TableCell><Badge variant="outline" className={typeBadgeStyles[p.type] ?? ""}>{p.type}</Badge></TableCell>
+                          <TableCell><Badge variant="outline">{p.type}</Badge></TableCell>
                           <TableCell className="text-sm text-muted-foreground">{p.category}</TableCell>
                           <TableCell className="text-right font-mono">{p.units}</TableCell>
                         </TableRow>
@@ -505,7 +497,7 @@ export function WeeklyCountMode() {
                             <span className="text-muted-foreground text-sm">{l.product?.variant_label}</span>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={typeBadgeStyles[l.product?.type] ?? ""}>{l.product?.type}</Badge>
+                            <Badge variant="outline">{l.product?.type}</Badge>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">{l.product?.category}</TableCell>
                           <TableCell className="text-center font-mono">{l.system_qty}</TableCell>

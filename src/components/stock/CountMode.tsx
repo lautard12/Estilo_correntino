@@ -118,12 +118,17 @@ export function CountMode({ products, onApply, onExit }: CountModeProps) {
     );
   }
 
-  const types: { label: string; value: string }[] = [
-    { label: 'Todos', value: 'all' },
-    { label: 'Bebidas', value: 'BEBIDAS' },
-    { label: 'Snacks', value: 'SNACKS' },
-    { label: 'Cigarrillos', value: 'CIGARRILLOS' },
-  ];
+  const types = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { label: string; value: string }[] = [{ label: 'Todos', value: 'all' }];
+    for (const p of products) {
+      if (p.type && !seen.has(p.type)) {
+        seen.add(p.type);
+        result.push({ label: p.type, value: p.type });
+      }
+    }
+    return result;
+  }, [products]);
 
   return (
     <div className="space-y-4">
