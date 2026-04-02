@@ -128,7 +128,7 @@ export default function Finanzas() {
   const presetLabel = preset === "today" ? "Hoy" : preset === "7days" ? "Últimos 7 días" : preset === "month" ? "Este mes" : "Período personalizado";
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       {/* Header */}
       <div>
         <div className="flex items-center gap-2.5">

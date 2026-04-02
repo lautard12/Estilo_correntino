@@ -283,7 +283,7 @@ export default function Ventas() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="p-4 md:p-6 space-y-4">
       <div className="flex items-center gap-2">
         <Receipt className="h-6 w-6 text-primary" />
         <h1 className="text-2xl font-bold">Historial de Ventas</h1>
