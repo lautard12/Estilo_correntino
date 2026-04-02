@@ -10,9 +10,10 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { Copy } from "lucide-react";
 import {
-  ensureProductPrices, saveProductPrices, fetchPriceSettings,
-  type ProductPrice, type PriceSettings,
+  ensureProductPrices, saveProductPrices,
+  type ProductPrice,
 } from "@/lib/price-store";
+import { fetchPriceTerms, type PriceTerm } from "@/lib/config-store";
 
 interface Props {
   open: boolean;
@@ -27,9 +28,9 @@ export default function PriceDrawer({ open, onOpenChange, productId, productName
   const [baseDel, setBaseDel] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const { data: settings } = useQuery<PriceSettings>({
-    queryKey: ["price-settings"],
-    queryFn: fetchPriceSettings,
+  const { data: priceTerms = [] } = useQuery<PriceTerm[]>({
+    queryKey: ["cfg-price-terms"],
+    queryFn: fetchPriceTerms,
   });
 
   const { data: prices } = useQuery<ProductPrice[]>({
@@ -47,8 +48,8 @@ export default function PriceDrawer({ open, onOpenChange, productId, productName
     }
   }, [prices]);
 
-  const c1Pct = settings?.credit_1_pct ?? 10;
-  const c3Pct = settings?.credit_3_pct ?? 20;
+  const c1Pct = priceTerms.find((t) => t.code === "CREDITO_1")?.surcharge_pct ?? 10;
+  const c3Pct = priceTerms.find((t) => t.code === "CREDITO_3")?.surcharge_pct ?? 20;
 
   const calc = (base: string, pct: number) => {
     const n = parseFloat(base) || 0;
@@ -56,7 +57,7 @@ export default function PriceDrawer({ open, onOpenChange, productId, productName
   };
 
   const handleSave = async () => {
-    if (!productId || !settings) return;
+    if (!productId) return;
     const br = parseFloat(baseRest) || 0;
     const bd = parseFloat(baseDel) || 0;
     if (br < 0 || bd < 0) {
@@ -65,7 +66,7 @@ export default function PriceDrawer({ open, onOpenChange, productId, productName
     }
     setSaving(true);
     try {
-      await saveProductPrices(productId, br, bd, settings);
+      await saveProductPrices(productId, br, bd, c1Pct, c3Pct);
       queryClient.invalidateQueries({ queryKey: ["product-prices", productId] });
       queryClient.invalidateQueries({ queryKey: ["price-completeness"] });
       toast({ title: "Precios guardados" });

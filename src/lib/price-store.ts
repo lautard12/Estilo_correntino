@@ -77,15 +77,16 @@ export async function saveProductPrices(
   productId: string,
   baseRestaurante: number,
   baseDelivery: number,
-  settings: PriceSettings
+  credit1Pct: number,
+  credit3Pct: number
 ) {
   const rows = [
     { channel: "LOCAL", term: "EFECTIVO", price: baseRestaurante },
-    { channel: "LOCAL", term: "CREDITO_1", price: Math.round(baseRestaurante * (1 + settings.credit_1_pct / 100)) },
-    { channel: "LOCAL", term: "CREDITO_3", price: Math.round(baseRestaurante * (1 + settings.credit_3_pct / 100)) },
+    { channel: "LOCAL", term: "CREDITO_1", price: Math.round(baseRestaurante * (1 + credit1Pct / 100)) },
+    { channel: "LOCAL", term: "CREDITO_3", price: Math.round(baseRestaurante * (1 + credit3Pct / 100)) },
     { channel: "ONLINE", term: "EFECTIVO", price: baseDelivery },
-    { channel: "ONLINE", term: "CREDITO_1", price: Math.round(baseDelivery * (1 + settings.credit_1_pct / 100)) },
-    { channel: "ONLINE", term: "CREDITO_3", price: Math.round(baseDelivery * (1 + settings.credit_3_pct / 100)) },
+    { channel: "ONLINE", term: "CREDITO_1", price: Math.round(baseDelivery * (1 + credit1Pct / 100)) },
+    { channel: "ONLINE", term: "CREDITO_3", price: Math.round(baseDelivery * (1 + credit3Pct / 100)) },
   ];
 
   for (const row of rows) {
