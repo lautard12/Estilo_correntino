@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -57,11 +57,38 @@ export function CheckoutModal({
 
   // Multi-payment lines
   const [paymentLines, setPaymentLines] = useState<PaymentLineState[]>([]);
+  // The real total to charge — updates when the payment term changes
+  const [effectiveTotal, setEffectiveTotal] = useState(total);
 
   const { data: priceTerms = [] } = useQuery({ queryKey: ["cfg-price-terms"], queryFn: fetchPriceTerms });
   const activeTerms = priceTerms.filter((t) => t.is_active);
 
   const getTermByCode = (code: string) => activeTerms.find((t) => t.code === code);
+
+  // Base items total (without the current term's surcharge and without delivery fee)
+  // Used to recalculate when user changes the payment term inside the modal
+  const currentTermSurchargePct = activeTerms.find((t) => t.code === priceTerm)?.surcharge_pct ?? 0;
+  const baseItemsTotal = currentTermSurchargePct > 0
+    ? Math.round((total - deliveryFee) / (1 + currentTermSurchargePct / 100))
+    : total - deliveryFee;
+
+  // Initialize payment lines and effective total whenever the modal opens
+  useEffect(() => {
+    if (!open) return;
+    const defaultTerm = activeTerms.find((t) => t.code === priceTerm) ?? activeTerms[0];
+    setMode("sale");
+    setCashReceived("");
+    setLayName(""); setLayPhone(""); setLayDeposit("");
+    setLayMethod(activeTerms.find((t) => t.fund === "EFECTIVO")?.code ?? activeTerms[0]?.code ?? "");
+    setLayDue(""); setLayNotes("");
+    lineIdCounter = 0;
+    setEffectiveTotal(total);
+    setPaymentLines([{
+      id: ++lineIdCounter,
+      termCode: defaultTerm?.code ?? "BASE",
+      amount: String(total),
+    }]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute totals per line
   const lineDetails = useMemo(() => {
@@ -76,7 +103,7 @@ export function CheckoutModal({
   }, [paymentLines, activeTerms]);
 
   const totalAssigned = lineDetails.reduce((s, l) => s + l.amount, 0);
-  const remaining = total - totalAssigned;
+  const remaining = effectiveTotal - totalAssigned;
   const totalCommissions = lineDetails.reduce((s, l) => s + l.commAmount, 0);
   const isValid = remaining === 0 && paymentLines.length > 0 && paymentLines.every((l) => (parseInt(l.amount) || 0) > 0);
 
@@ -98,7 +125,20 @@ export function CheckoutModal({
   };
 
   const updateLine = (id: number, field: keyof PaymentLineState, value: string) => {
-    setPaymentLines((prev) => prev.map((l) => l.id === id ? { ...l, [field]: value } : l));
+    setPaymentLines((prev) => prev.map((l) => {
+      if (l.id !== id) return l;
+      const updated = { ...l, [field]: value };
+      // If changing the term on a single-line payment, recalculate the amount
+      if (field === "termCode" && prev.length === 1) {
+        const newTerm = activeTerms.find((t) => t.code === value);
+        const newSurcharge = newTerm?.surcharge_pct ?? 0;
+        const newItemsTotal = Math.round(baseItemsTotal * (1 + newSurcharge / 100));
+        const newTotal = newItemsTotal + deliveryFee;
+        updated.amount = String(newTotal);
+        setEffectiveTotal(newTotal);
+      }
+      return updated;
+    }));
   };
 
   const removeLine = (id: number) => {
@@ -131,21 +171,6 @@ export function CheckoutModal({
   };
 
   const handleOpenChange = (v: boolean) => {
-    if (v) {
-      setMode("sale");
-      setCashReceived("");
-      setLayName(""); setLayPhone(""); setLayDeposit("");
-      setLayMethod((activeTerms.find((t) => t.fund === "EFECTIVO")?.code) ?? (activeTerms[0]?.code) ?? "");
-      setLayDue(""); setLayNotes("");
-      // Initialize with a single payment line for the full total
-      const defaultTerm = activeTerms.find((t) => t.code === priceTerm) ?? activeTerms[0];
-      lineIdCounter = 0;
-      setPaymentLines([{
-        id: ++lineIdCounter,
-        termCode: defaultTerm?.code ?? "EFECTIVO",
-        amount: String(total),
-      }]);
-    }
     onOpenChange(v);
   };
 
@@ -154,7 +179,7 @@ export function CheckoutModal({
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{mode === "sale" ? "Cobrar venta" : "Registrar seña"}</DialogTitle>
-          <DialogDescription>Total: ${total.toLocaleString("es-AR")}</DialogDescription>
+          <DialogDescription>Total: ${effectiveTotal.toLocaleString("es-AR")}</DialogDescription>
         </DialogHeader>
 
         {onLayaway && (
@@ -166,7 +191,7 @@ export function CheckoutModal({
 
         {mode === "sale" ? (
           <SaleMode
-            total={total}
+            total={effectiveTotal}
             subtotalLocal={subtotalLocal}
             discountTotal={discountTotal}
             deliveryFee={deliveryFee}
@@ -226,7 +251,7 @@ function SaleMode({
       <div className="space-y-3 text-sm">
         <div className="flex justify-between text-muted-foreground">
           <span>Subtotal productos</span>
-          <span>${(subtotalLocal - discountTotal).toLocaleString("es-AR")}</span>
+          <span>${(total - discountTotal - deliveryFee).toLocaleString("es-AR")}</span>
         </div>
         {discountTotal < 0 && (
           <div className="flex justify-between text-primary font-medium">

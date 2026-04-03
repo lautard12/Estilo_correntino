@@ -43,7 +43,7 @@ export default function POS() {
   const qc = useQueryClient();
 
   const [channel, setChannel] = useState<Channel>("LOCAL");
-  const [selectedTermCode, setSelectedTermCode] = useState("EFECTIVO");
+  const [selectedTermCode, setSelectedTermCode] = useState("BASE");
   const [deliveryFee, setDeliveryFee] = useState(0);
 
   const [cart, setCart] = useState<CartItem[]>([]);
