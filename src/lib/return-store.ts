@@ -7,6 +7,12 @@ export interface SalePayment {
   commission_amount: number;
 }
 
+export interface LayawayInfo {
+  paid: number;
+  balance: number;
+  due_date: string | null;
+}
+
 export interface SaleForReturn {
   id: string;
   created_at: string;
@@ -21,6 +27,7 @@ export interface SaleForReturn {
   neto: number;
   cogs: number;
   margen: number;
+  layaway?: LayawayInfo;
   items: {
     id: string;
     product_id: string | null;
@@ -41,7 +48,7 @@ export async function fetchRecentSales(limit = 50): Promise<SaleForReturn[]> {
   const { data: sales, error } = await supabase
     .from("pos_sales")
     .select("id, created_at, total, channel, status, created_by, customer_name_snapshot, customer_email_snapshot")
-    .eq("status", "COMPLETED")
+    .in("status", ["COMPLETED", "LAYAWAY"])
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw error;
@@ -49,7 +56,9 @@ export async function fetchRecentSales(limit = 50): Promise<SaleForReturn[]> {
   const saleIds = (sales ?? []).map((s) => s.id);
   if (saleIds.length === 0) return [];
 
-  const [itemsRes, paymentsRes, profilesRes, productsRes] = await Promise.all([
+  const layawaySaleIds = (sales ?? []).filter((s) => s.status === "LAYAWAY").map((s) => s.id);
+
+  const [itemsRes, paymentsRes, profilesRes, productsRes, layawaysRes] = await Promise.all([
     supabase
       .from("pos_sale_items")
       .select("id, sale_id, product_id, name_snapshot, variant_snapshot, qty, unit_price, line_total, item_type, promotion_id")
@@ -60,11 +69,22 @@ export async function fetchRecentSales(limit = 50): Promise<SaleForReturn[]> {
       .in("sale_id", saleIds),
     supabase.from("profiles").select("user_id, display_name"),
     supabase.from("products").select("id, cost_price"),
+    layawaySaleIds.length > 0
+      ? supabase
+          .from("pos_layaways")
+          .select("sale_id, paid, balance, due_date")
+          .in("sale_id", layawaySaleIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (itemsRes.error) throw itemsRes.error;
   if (paymentsRes.error) throw paymentsRes.error;
   if (productsRes.error) throw productsRes.error;
+
+  const layawayMap: Record<string, LayawayInfo> = {};
+  for (const l of layawaysRes.data ?? []) {
+    layawayMap[l.sale_id] = { paid: l.paid, balance: l.balance, due_date: l.due_date };
+  }
 
   const productCostMap: Record<string, number> = {};
   for (const p of productsRes.data ?? []) {
@@ -144,6 +164,7 @@ export async function fetchRecentSales(limit = 50): Promise<SaleForReturn[]> {
       neto,
       cogs,
       margen,
+      layaway: layawayMap[s.id],
       items: saleItems,
       payments: salePayments,
     };

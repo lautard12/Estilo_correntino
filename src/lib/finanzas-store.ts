@@ -40,6 +40,7 @@ export interface DayRow {
 
 export interface DayDetail {
   ticketCount: number;
+  layawayCount: number;
   bruto: number;
   comisiones: number;
   cogs: number;
@@ -64,33 +65,52 @@ export function computeFund(paymentMethod: string): Fund {
 // ─── Resultado ───────────────────────────────────────────────────────
 
 export async function fetchResultadoRange(from: string, to: string): Promise<DayRow[]> {
-  // 1. Fetch COMPLETED sales with their payments
-  const { data: sales } = await supabase
-    .from("pos_sales")
-    .select("id, created_at")
-    .eq("status", "COMPLETED")
+  // Revenue is attributed to each payment's own created_at date, not the sale date.
+  // This ensures layaway balance payments show up on the day they were actually collected.
+  // COGS is still attributed to the sale creation date (when stock is physically reserved).
+
+  // 1. Fetch payments made in the date range
+  const { data: rawPayments } = await supabase
+    .from("pos_payments")
+    .select("sale_id, amount, commission_amount, created_at")
     .gte("created_at", dayStart(from))
     .lte("created_at", dayEnd(to));
 
-  const saleIds = (sales ?? []).map((s) => s.id);
+  const paymentSaleIds = [...new Set((rawPayments ?? []).map((p) => p.sale_id))];
 
-  // 2. Fetch payments for those sales
-  let payments: { sale_id: string; amount: number; commission_amount: number }[] = [];
-  if (saleIds.length > 0) {
-    const { data } = await supabase
-      .from("pos_payments")
-      .select("sale_id, amount, commission_amount")
-      .in("sale_id", saleIds);
-    payments = (data ?? []) as typeof payments;
+  // 2. Validate those sales are COMPLETED or LAYAWAY
+  const validSaleIds = new Set<string>();
+  if (paymentSaleIds.length > 0) {
+    const { data: validSales } = await supabase
+      .from("pos_sales")
+      .select("id")
+      .in("id", paymentSaleIds)
+      .in("status", ["COMPLETED", "LAYAWAY"]);
+    for (const s of validSales ?? []) validSaleIds.add(s.id);
   }
 
-  // 3. Fetch sale items (owner=LOCAL) with product cost_price
+  const payments = (rawPayments ?? []).filter((p) => validSaleIds.has(p.sale_id));
+
+  // 3. For COGS: sales *created* in the date range (stock reserved at creation time)
+  const { data: cogsSales } = await supabase
+    .from("pos_sales")
+    .select("id, created_at")
+    .in("status", ["COMPLETED", "LAYAWAY"])
+    .gte("created_at", dayStart(from))
+    .lte("created_at", dayEnd(to));
+
+  const cogsSaleIds = (cogsSales ?? []).map((s) => s.id);
+  const cogsSaleDateMap = new Map<string, string>();
+  for (const s of cogsSales ?? []) {
+    cogsSaleDateMap.set(s.id, format(new Date(s.created_at), "yyyy-MM-dd"));
+  }
+
   let items: { sale_id: string; qty: number; cost_price: number }[] = [];
-  if (saleIds.length > 0) {
+  if (cogsSaleIds.length > 0) {
     const { data } = await supabase
       .from("pos_sale_items")
       .select("sale_id, qty, owner, product_id, products(cost_price)")
-      .in("sale_id", saleIds)
+      .in("sale_id", cogsSaleIds)
       .eq("owner", "LOCAL");
     items = (data ?? []).map((i: any) => ({
       sale_id: i.sale_id,
@@ -107,12 +127,6 @@ export async function fetchResultadoRange(from: string, to: string): Promise<Day
     .lte("date", to)
     .eq("is_pass_through", false);
 
-  // Build sale -> date map
-  const saleDateMap = new Map<string, string>();
-  for (const s of sales ?? []) {
-    saleDateMap.set(s.id, format(new Date(s.created_at), "yyyy-MM-dd"));
-  }
-
   // Build day map
   const days = eachDayOfInterval({ start: parseISO(from), end: parseISO(to) });
   const map = new Map<string, DayRow>();
@@ -121,19 +135,19 @@ export async function fetchResultadoRange(from: string, to: string): Promise<Day
     map.set(key, { date: key, bruto: 0, comisiones: 0, neto: 0, cogs: 0, gastos: 0, ganancia: 0 });
   }
 
-  // Aggregate payments
+  // Aggregate revenue by payment date
   for (const p of payments) {
-    const key = saleDateMap.get(p.sale_id);
-    const row = key ? map.get(key) : undefined;
+    const key = format(new Date(p.created_at), "yyyy-MM-dd");
+    const row = map.get(key);
     if (row) {
       row.bruto += p.amount;
-      row.comisiones += p.commission_amount;
+      row.comisiones += p.commission_amount ?? 0;
     }
   }
 
-  // Aggregate COGS
+  // Aggregate COGS by sale creation date
   for (const i of items) {
-    const key = saleDateMap.get(i.sale_id);
+    const key = cogsSaleDateMap.get(i.sale_id);
     const row = key ? map.get(key) : undefined;
     if (row) {
       row.cogs += i.qty * i.cost_price;
@@ -159,37 +173,55 @@ export async function fetchResultadoRange(from: string, to: string): Promise<Day
 }
 
 export async function fetchDayDetail(dateStr: string): Promise<DayDetail> {
-  // Sales
-  const { data: sales } = await supabase
-    .from("pos_sales")
-    .select("id")
-    .eq("status", "COMPLETED")
+  // Revenue: payments made on this day (by payment date, not sale date)
+  const { data: rawPayments } = await supabase
+    .from("pos_payments")
+    .select("sale_id, amount, commission_amount")
     .gte("created_at", dayStart(dateStr))
     .lte("created_at", dayEnd(dateStr));
 
-  const saleIds = (sales ?? []).map((s) => s.id);
+  const paymentSaleIds = [...new Set((rawPayments ?? []).map((p) => p.sale_id))];
 
-  // Payments
-  let bruto = 0;
-  let comisiones = 0;
-  if (saleIds.length > 0) {
-    const { data: payments } = await supabase
-      .from("pos_payments")
-      .select("amount, commission_amount")
-      .in("sale_id", saleIds);
-    for (const p of payments ?? []) {
-      bruto += p.amount;
-      comisiones += p.commission_amount ?? 0;
-    }
+  // Validate sales status
+  const saleStatusMap = new Map<string, string>();
+  if (paymentSaleIds.length > 0) {
+    const { data: validSales } = await supabase
+      .from("pos_sales")
+      .select("id, status")
+      .in("id", paymentSaleIds)
+      .in("status", ["COMPLETED", "LAYAWAY"]);
+    for (const s of validSales ?? []) saleStatusMap.set(s.id, s.status);
   }
 
-  // COGS (LOCAL items)
+  const payments = (rawPayments ?? []).filter((p) => saleStatusMap.has(p.sale_id));
+
+  let bruto = 0;
+  let comisiones = 0;
+  for (const p of payments) {
+    bruto += p.amount;
+    comisiones += p.commission_amount ?? 0;
+  }
+
+  const ticketCount = new Set(payments.map((p) => p.sale_id)).size;
+  const layawayCount = new Set(
+    payments.filter((p) => saleStatusMap.get(p.sale_id) === "LAYAWAY").map((p) => p.sale_id)
+  ).size;
+
+  // COGS: sales *created* on this day (stock reserved at creation)
+  const { data: cogsSales } = await supabase
+    .from("pos_sales")
+    .select("id")
+    .in("status", ["COMPLETED", "LAYAWAY"])
+    .gte("created_at", dayStart(dateStr))
+    .lte("created_at", dayEnd(dateStr));
+
+  const cogsSaleIds = (cogsSales ?? []).map((s) => s.id);
   let cogs = 0;
-  if (saleIds.length > 0) {
+  if (cogsSaleIds.length > 0) {
     const { data: items } = await supabase
       .from("pos_sale_items")
       .select("qty, products(cost_price)")
-      .in("sale_id", saleIds)
+      .in("sale_id", cogsSaleIds)
       .eq("owner", "LOCAL");
     for (const i of items ?? []) {
       cogs += i.qty * ((i as any).products?.cost_price ?? 0);
@@ -205,7 +237,8 @@ export async function fetchDayDetail(dateStr: string): Promise<DayDetail> {
     .order("created_at", { ascending: false });
 
   return {
-    ticketCount: saleIds.length,
+    ticketCount,
+    layawayCount,
     bruto,
     comisiones,
     cogs,

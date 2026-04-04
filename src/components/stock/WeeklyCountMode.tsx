@@ -56,6 +56,7 @@ export function WeeklyCountMode() {
   // Count inputs
   const [countInputs, setCountInputs] = useState<Record<string, string>>({});
   const [previewDiffs, setPreviewDiffs] = useState<any[] | null>(null);
+  const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
   const [inputsInitialized, setInputsInitialized] = useState(false);
@@ -129,12 +130,15 @@ export function WeeklyCountMode() {
   };
 
   const handleCreateCount = async () => {
+    setCreating(true);
     try {
       await createCount(startStr, endStr);
       refetchCount();
       toast({ title: "Conteo creado" });
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -154,6 +158,8 @@ export function WeeklyCountMode() {
     try {
       const linesToSave = countLines.map((l: any) => ({
         id: l.id,
+        product_id: l.product_id,
+        system_qty: l.system_qty,
         counted_qty: countInputs[l.id] !== undefined && countInputs[l.id] !== "" ? parseInt(countInputs[l.id]) : null,
       }));
       await saveDraft(countRecord!.id, linesToSave);
@@ -183,6 +189,8 @@ export function WeeklyCountMode() {
       // Save draft first
       const linesToSave = countLines.map((l: any) => ({
         id: l.id,
+        product_id: l.product_id,
+        system_qty: l.system_qty,
         counted_qty: countInputs[l.id] !== undefined && countInputs[l.id] !== "" ? parseInt(countInputs[l.id]) : null,
       }));
       await saveDraft(countRecord!.id, linesToSave);
@@ -304,8 +312,8 @@ export function WeeklyCountMode() {
         </div>
 
         {rangeLoaded && !countRecord && (
-          <Button variant="outline" onClick={handleCreateCount}>
-            <ClipboardCheck className="mr-2 h-4 w-4" /> Crear conteo para este rango
+          <Button variant="outline" onClick={handleCreateCount} disabled={creating}>
+            <ClipboardCheck className="mr-2 h-4 w-4" /> {creating ? "Creando..." : "Crear conteo para este rango"}
           </Button>
         )}
       </div>

@@ -174,9 +174,6 @@ export default function Stock() {
                   <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => { setActionProduct(p); setActionType('PURCHASE'); }}>
                     <Plus className="h-3 w-3 mr-1" />Compra
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setPurchaseHistoryProduct(p)}>
-                    <ShoppingBag className="h-3 w-3 mr-1" />Compras
-                  </Button>
                 </div>
               </TableCell>
             </TableRow>

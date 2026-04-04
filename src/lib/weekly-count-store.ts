@@ -89,7 +89,7 @@ export async function fetchCountForRange(startDate: string, endDate: string) {
 }
 
 export async function createCount(startDate: string, endDate: string) {
-  // Get active products with track_stock=true and their balances
+  // Get active products with track_stock=true and their current balances
   const { data: products, error: pErr } = await supabase
     .from("products")
     .select("id, stock_balances(qty_on_hand)")
@@ -97,28 +97,47 @@ export async function createCount(startDate: string, endDate: string) {
     .eq("track_stock", true);
   if (pErr) throw pErr;
 
-  const { data: count, error: cErr } = await supabase
+  // Check if a count already exists for this range (prevents duplicate key on double-click)
+  const { data: existing } = await supabase
     .from("inventory_counts")
-    .insert({ start_date: startDate, end_date: endDate })
     .select()
-    .single();
-  if (cErr) throw cErr;
+    .eq("start_date", startDate)
+    .eq("end_date", endDate)
+    .maybeSingle();
 
-  const lines = (products ?? []).map((p: any) => {
-    const sysQty = p.stock_balances?.qty_on_hand ?? 0;
-    return {
+  const count = existing ?? await (async () => {
+    const { data, error: cErr } = await supabase
+      .from("inventory_counts")
+      .insert({ start_date: startDate, end_date: endDate })
+      .select()
+      .single();
+    if (cErr) throw cErr;
+    return data;
+  })();
+
+  // Always verify lines exist — create any missing ones (handles case where
+  // lines were never inserted due to a prior RLS issue or double-click race)
+  const { data: existingLines } = await supabase
+    .from("inventory_count_lines")
+    .select("product_id")
+    .eq("count_id", count.id);
+
+  const existingProductIds = new Set((existingLines ?? []).map((l: any) => l.product_id));
+
+  const missingLines = (products ?? [])
+    .filter((p: any) => !existingProductIds.has(p.id))
+    .map((p: any) => ({
       count_id: count.id,
       product_id: p.id,
-      system_qty: sysQty,
-      counted_qty: sysQty,
+      system_qty: (p.stock_balances as any)?.qty_on_hand ?? 0,
+      counted_qty: (p.stock_balances as any)?.qty_on_hand ?? 0,
       diff_qty: 0,
-    };
-  });
+    }));
 
-  if (lines.length > 0) {
+  if (missingLines.length > 0) {
     const { error: lErr } = await supabase
       .from("inventory_count_lines")
-      .insert(lines);
+      .insert(missingLines);
     if (lErr) throw lErr;
   }
 
@@ -138,27 +157,22 @@ export async function fetchCountLines(countId: string) {
   }));
 }
 
-export async function saveDraft(countId: string, lines: { id: string; counted_qty: number | null }[]) {
-  for (const line of lines) {
-    const diff = line.counted_qty != null ? line.counted_qty - 0 : null; // will be recalculated
-    await supabase
-      .from("inventory_count_lines")
-      .update({ counted_qty: line.counted_qty })
-      .eq("id", line.id);
-  }
-  // Recalculate diff_qty from system_qty
-  const { data: updated } = await supabase
+export async function saveDraft(countId: string, lines: { id: string; product_id: string; system_qty: number; counted_qty: number | null }[]) {
+  // Single bulk upsert: product_id must be included because PostgreSQL validates
+  // the INSERT side of upsert before checking the conflict, even for existing rows.
+  const updates = lines.map((l) => ({
+    id: l.id,
+    count_id: countId,
+    product_id: l.product_id,
+    system_qty: l.system_qty,
+    counted_qty: l.counted_qty,
+    diff_qty: l.counted_qty != null ? l.counted_qty - l.system_qty : null,
+  }));
+
+  const { error } = await supabase
     .from("inventory_count_lines")
-    .select("id, system_qty, counted_qty")
-    .eq("count_id", countId);
-  
-  for (const l of updated ?? []) {
-    const diff = l.counted_qty != null ? l.counted_qty - l.system_qty : null;
-    await supabase
-      .from("inventory_count_lines")
-      .update({ diff_qty: diff })
-      .eq("id", l.id);
-  }
+    .upsert(updates, { onConflict: "id" });
+  if (error) throw error;
 }
 
 export async function applyCountAdjustments(countId: string, startDate: string, endDate: string) {
@@ -201,19 +215,23 @@ export async function applyCountAdjustments(countId: string, startDate: string, 
     if (bErr) throw bErr;
   }
 
-  const { error: uErr } = await supabase
+  const { data: updated, error: uErr } = await supabase
     .from("inventory_counts")
     .update({ status: "ADJUSTED", adjusted_at: new Date().toISOString() })
-    .eq("id", countId);
+    .eq("id", countId)
+    .select("id");
   if (uErr) throw uErr;
+  if (!updated || updated.length === 0) throw new Error("No se pudo actualizar el estado del conteo. Verificá los permisos de la tabla.");
 }
 
 export async function closeCount(countId: string) {
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("inventory_counts")
     .update({ status: "CLOSED", closed_at: new Date().toISOString() })
-    .eq("id", countId);
+    .eq("id", countId)
+    .select("id");
   if (error) throw error;
+  if (!updated || updated.length === 0) throw new Error("No se pudo cerrar el conteo. Verificá los permisos de la tabla.");
 }
 
 export async function fetchLastClosedCount() {

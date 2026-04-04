@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, startOfDay, endOfDay, isWithinInterval } from "date-fns";
 import { es } from "date-fns/locale";
 import { toast } from "sonner";
-import { Receipt, Search, RotateCcw, CalendarIcon, X } from "lucide-react";
+import { Receipt, Search, RotateCcw, CalendarIcon, X, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -412,7 +412,14 @@ export default function Ventas() {
                     </TableCell>
                     <TableCell className="text-sm">{s.seller_name}</TableCell>
                     <TableCell className="text-sm max-w-[200px] truncate">
-                      {s.items.filter((i) => (i as any).item_type !== "DISCOUNT").map((i) => `${i.name_snapshot} ×${i.qty}`).join(", ")}
+                      <div className="flex flex-wrap items-center gap-1">
+                        {s.status === "LAYAWAY" && (
+                          <Badge variant="outline" className="text-xs border-amber-400 text-amber-600 bg-amber-50 shrink-0">
+                            <Clock className="h-3 w-3 mr-1" />Seña
+                          </Badge>
+                        )}
+                        <span>{s.items.filter((i) => (i as any).item_type !== "DISCOUNT").map((i) => `${i.name_snapshot} ×${i.qty}`).join(", ")}</span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <PaymentBadges payments={s.payments} />
@@ -421,29 +428,43 @@ export default function Ventas() {
                       {s.customer_name || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell className="text-right font-medium">
-                      {fmt(s.total)}
-                      {/* Mobile-only: neto & margen below total */}
-                      <div className="md:hidden text-xs mt-1 space-y-0.5">
-                        <div className="text-green-600">Neto: {fmt(saleNeto)}</div>
-                        <div className={saleMargen >= 0 ? "text-green-600" : "text-red-500"}>
-                          Margen: {fmt(saleMargen)}
+                      {s.status === "LAYAWAY" && s.layaway ? (
+                        <div>
+                          <span className="text-amber-600">{fmt(s.layaway.paid)}</span>
+                          <div className="text-xs text-muted-foreground">de {fmt(s.total)}</div>
                         </div>
-                      </div>
+                      ) : (
+                        <>
+                          {fmt(s.total)}
+                          <div className="md:hidden text-xs mt-1 space-y-0.5">
+                            <div className="text-green-600">Neto: {fmt(saleNeto)}</div>
+                            <div className={saleMargen >= 0 ? "text-green-600" : "text-red-500"}>
+                              Margen: {fmt(saleMargen)}
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </TableCell>
-                    <TableCell className="text-right text-green-600 font-medium hidden md:table-cell">
-                      {fmt(saleNeto)}
+                    <TableCell className="text-right font-medium hidden md:table-cell">
+                      {s.status === "LAYAWAY" && s.layaway ? (
+                        <span className="text-amber-600 text-xs">saldo {fmt(s.layaway.balance)}</span>
+                      ) : (
+                        <span className="text-green-600">{fmt(saleNeto)}</span>
+                      )}
                     </TableCell>
                     <TableCell className={`text-right font-medium hidden md:table-cell ${saleMargen >= 0 ? "text-green-600" : "text-red-500"}`}>
-                      {fmt(saleMargen)}
+                      {s.status === "LAYAWAY" ? <span className="text-muted-foreground">—</span> : fmt(saleMargen)}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => { e.stopPropagation(); openReturn(s); }}
-                      >
-                        <RotateCcw className="h-3 w-3 mr-1" /> Devolver
-                      </Button>
+                      {s.status !== "LAYAWAY" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => { e.stopPropagation(); openReturn(s); }}
+                        >
+                          <RotateCcw className="h-3 w-3 mr-1" /> Devolver
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 );
@@ -482,8 +503,37 @@ export default function Ventas() {
                 </div>
               )}
 
-              {/* Financial Summary */}
-              <FinancialSummary sale={detailSale} />
+              {/* Layaway info block */}
+              {detailSale.status === "LAYAWAY" && detailSale.layaway && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-amber-700 font-semibold text-sm">
+                    <Clock className="h-4 w-4" />
+                    Seña — venta pendiente de completar
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Total venta</p>
+                      <p className="font-medium">{fmt(detailSale.total)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Señado</p>
+                      <p className="font-medium text-amber-700">{fmt(detailSale.layaway.paid)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Saldo</p>
+                      <p className="font-medium text-destructive">{fmt(detailSale.layaway.balance)}</p>
+                    </div>
+                  </div>
+                  {detailSale.layaway.due_date && (
+                    <p className="text-xs text-muted-foreground">
+                      Vence: {format(new Date(detailSale.layaway.due_date + "T12:00:00"), "dd/MM/yyyy")}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Financial Summary (only for completed sales) */}
+              {detailSale.status !== "LAYAWAY" && <FinancialSummary sale={detailSale} />}
 
               <div>
                 <p className="text-sm font-medium text-muted-foreground mb-1">Productos</p>
@@ -505,9 +555,11 @@ export default function Ventas() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDetailSale(null)}>Cerrar</Button>
-            <Button onClick={() => detailSale && openReturn(detailSale)}>
-              <RotateCcw className="h-3 w-3 mr-1" /> Devolver
-            </Button>
+            {detailSale?.status !== "LAYAWAY" && (
+              <Button onClick={() => detailSale && openReturn(detailSale)}>
+                <RotateCcw className="h-3 w-3 mr-1" /> Devolver
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

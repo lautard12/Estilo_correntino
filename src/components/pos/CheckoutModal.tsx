@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Pencil, Check, X } from "lucide-react";
 import type { PaymentLine } from "@/lib/pos-store";
 import { fetchPriceTerms, type PriceTerm } from "@/lib/config-store";
 
@@ -114,6 +114,18 @@ export function CheckoutModal({
   const parsedCashReceived = parseInt(cashReceived) || 0;
   const cashChange = hasCashPayment ? parsedCashReceived - totalCash : 0;
 
+  const handleCustomTotal = (newTotal: number) => {
+    if (newTotal <= 0) return;
+    setEffectiveTotal(newTotal);
+    // If there's a single payment line, auto-update its amount
+    setPaymentLines((prev) => {
+      if (prev.length === 1) {
+        return [{ ...prev[0], amount: String(newTotal) }];
+      }
+      return prev;
+    });
+  };
+
   const addLine = () => {
     const defaultTerm = activeTerms.find((t) => t.code === priceTerm) ?? activeTerms[0];
     const amt = remaining > 0 ? String(remaining) : "";
@@ -192,6 +204,7 @@ export function CheckoutModal({
         {mode === "sale" ? (
           <SaleMode
             total={effectiveTotal}
+            originalTotal={total}
             subtotalLocal={subtotalLocal}
             discountTotal={discountTotal}
             deliveryFee={deliveryFee}
@@ -212,6 +225,7 @@ export function CheckoutModal({
             onUpdateLine={updateLine}
             onRemoveLine={removeLine}
             onCashReceivedChange={setCashReceived}
+            onCustomTotal={handleCustomTotal}
             onConfirm={handleConfirm}
             onCancel={() => onOpenChange(false)}
           />
@@ -240,18 +254,40 @@ export function CheckoutModal({
 // ─── Sale Mode Component ────────────────────────────────────────────
 
 function SaleMode({
-  total, subtotalLocal, discountTotal, deliveryFee, customerName,
+  total, originalTotal, subtotalLocal, discountTotal, deliveryFee, customerName,
   paymentLines, lineDetails, activeTerms, totalAssigned, remaining,
   totalCommissions, hasCashPayment, totalCash, cashReceived, cashChange,
   isValid, loading,
-  onAddLine, onUpdateLine, onRemoveLine, onCashReceivedChange, onConfirm, onCancel,
+  onAddLine, onUpdateLine, onRemoveLine, onCashReceivedChange, onCustomTotal, onConfirm, onCancel,
 }: any) {
+  const [editingTotal, setEditingTotal] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const startEdit = () => {
+    setEditValue(String(total));
+    setEditingTotal(true);
+    setTimeout(() => inputRef.current?.select(), 0);
+  };
+
+  const commitEdit = () => {
+    const parsed = parseInt(editValue);
+    if (parsed > 0) onCustomTotal(parsed);
+    setEditingTotal(false);
+  };
+
+  const cancelEdit = () => {
+    setEditingTotal(false);
+  };
+
+  const isModified = total !== originalTotal;
+
   return (
     <>
       <div className="space-y-3 text-sm">
         <div className="flex justify-between text-muted-foreground">
           <span>Subtotal productos</span>
-          <span>${(total - discountTotal - deliveryFee).toLocaleString("es-AR")}</span>
+          <span>${(originalTotal - discountTotal - deliveryFee).toLocaleString("es-AR")}</span>
         </div>
         {discountTotal < 0 && (
           <div className="flex justify-between text-primary font-medium">
@@ -265,10 +301,58 @@ function SaleMode({
             <span>${deliveryFee.toLocaleString("es-AR")}</span>
           </div>
         )}
-        <div className="flex justify-between font-semibold text-lg border-t pt-2">
-          <span>Total</span>
-          <span>${total.toLocaleString("es-AR")}</span>
+        <div className="flex justify-between items-center font-semibold text-lg border-t pt-2">
+          <div className="flex items-center gap-1.5">
+            <span>Total</span>
+            {isModified && (
+              <span className="text-xs font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                editado
+              </span>
+            )}
+          </div>
+          {editingTotal ? (
+            <div className="flex items-center gap-1">
+              <span className="text-muted-foreground">$</span>
+              <Input
+                ref={inputRef}
+                type="number"
+                className="w-28 h-7 text-base font-semibold text-right"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitEdit();
+                  if (e.key === "Escape") cancelEdit();
+                }}
+                onBlur={commitEdit}
+              />
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={commitEdit}>
+                <Check className="h-3.5 w-3.5 text-green-600" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={cancelEdit}>
+                <X className="h-3.5 w-3.5 text-destructive" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className={isModified ? "text-primary" : ""}>${total.toLocaleString("es-AR")}</span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                onClick={startEdit}
+                title="Editar total"
+              >
+                <Pencil className="h-3 w-3" />
+              </Button>
+            </div>
+          )}
         </div>
+        {isModified && (
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>Total original</span>
+            <span className="line-through">${originalTotal.toLocaleString("es-AR")}</span>
+          </div>
+        )}
       </div>
 
       {customerName && (

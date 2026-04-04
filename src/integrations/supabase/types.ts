@@ -342,6 +342,7 @@ export type Database = {
           amount: number
           commission_amount: number
           commission_pct: number
+          created_at: string
           fund: string
           id: string
           installments: number
@@ -352,6 +353,7 @@ export type Database = {
           amount: number
           commission_amount?: number
           commission_pct?: number
+          created_at?: string
           fund: string
           id?: string
           installments?: number
@@ -362,6 +364,7 @@ export type Database = {
           amount?: number
           commission_amount?: number
           commission_pct?: number
+          created_at?: string
           fund?: string
           id?: string
           installments?: number

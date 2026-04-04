@@ -409,9 +409,6 @@ export default function Finanzas() {
                 <Button size="sm" onClick={() => setShowFundModal(true)}>
                   <Plus className="h-4 w-4 mr-1" /> Agregar / Retirar fondos
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => setShowExpenseModal(true)}>
-                  <Plus className="h-4 w-4 mr-1" /> Registrar gasto
-                </Button>
               </div>
 
               <div className="rounded-md border">
@@ -770,7 +767,11 @@ function DayDetailDialog({
         ) : data ? (
           <div className="space-y-4">
             <div className="space-y-0">
-              <WaterfallRow label={`${data.ticketCount} tickets`} value={data.bruto} type="base" />
+              <WaterfallRow
+              label={data.layawayCount > 0 ? `${data.ticketCount} tickets (${data.layawayCount} seña${data.layawayCount > 1 ? "s" : ""})` : `${data.ticketCount} tickets`}
+              value={data.bruto}
+              type="base"
+            />
               <WaterfallRow label="Comisiones" value={comisionesDay} type="subtract" />
               <WaterfallRow label="Neto cobrado" value={netoDay} type="subtotal" />
               <WaterfallRow label="Costo de mercadería" value={data.cogs} type="subtract" />
